@@ -38,4 +38,13 @@ class AuthService {
     }
     return null;
   }
+
+  /// Memeriksa PIN milik Owner. Dipakai untuk otorisasi aksi sensitif,
+  /// misalnya membatalkan (void) transaksi yang dilakukan oleh kasir.
+  Future<bool> verifyOwnerPin(String pin) async {
+    await Future.delayed(const Duration(milliseconds: 200));
+    return _accounts.any(
+      (acc) => acc['role'] == 'owner' && acc['pin'] == pin.trim(),
+    );
+  }
 }
