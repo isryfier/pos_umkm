@@ -81,7 +81,13 @@ class TransactionModel {
   /// Kembalian.
   final int changeAmount;
 
+  /// Status transaksi: 'SUCCESS' (berhasil) atau 'VOID' (dibatalkan).
+  final String status;
+
   final List<TransactionItemModel> items;
+
+  /// True jika transaksi sudah dibatalkan.
+  bool get isVoid => status == 'VOID';
 
   const TransactionModel({
     this.id,
@@ -91,6 +97,7 @@ class TransactionModel {
     required this.total,
     required this.paidAmount,
     required this.changeAmount,
+    this.status = 'SUCCESS',
     this.items = const [],
   });
 
@@ -106,6 +113,7 @@ class TransactionModel {
       total: map['total'] as int,
       paidAmount: map['paidAmount'] as int,
       changeAmount: map['changeAmount'] as int,
+      status: (map['status'] as String?) ?? 'SUCCESS',
       items: items,
     );
   }
@@ -120,6 +128,7 @@ class TransactionModel {
       'total': total,
       'paidAmount': paidAmount,
       'changeAmount': changeAmount,
+      'status': status,
     };
   }
 }
