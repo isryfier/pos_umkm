@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../models/user_model.dart';
 import 'login_screen.dart';
+import 'pos_screen.dart';
 
 /// Dashboard untuk Kasir/Staff (akses terbatas).
-/// Sementara hanya menampilkan teks sambutan; fitur kasir menyusul di sesi berikutnya.
+/// Sesi 2B: ditambah tombol menuju layar kasir (POS).
 class CashierDashboardScreen extends StatelessWidget {
   final UserModel user;
 
@@ -38,6 +39,22 @@ class CashierDashboardScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(user.name, style: Theme.of(context).textTheme.bodyLarge),
+              const SizedBox(height: 32),
+
+              // Tombol menuju layar kasir (baru di Sesi 2B)
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => PosScreen(user: user)),
+                  );
+                },
+                icon: const Icon(Icons.shopping_cart_checkout),
+                label: const Text('Mulai Transaksi'),
+                style: FilledButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+              ),
             ],
           ),
         ),
