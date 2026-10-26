@@ -13,6 +13,16 @@ class StockException implements Exception {
   String toString() => message;
 }
 
+/// Dilempar saat pembatalan (void) transaksi tidak bisa dilakukan,
+/// misalnya transaksi tidak ditemukan atau sudah pernah dibatalkan.
+class VoidException implements Exception {
+  final String message;
+  const VoidException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 /// Pengelola database SQLite lokal.
 ///
 /// Memakai pola singleton: seluruh aplikasi berbagi satu koneksi database
@@ -29,8 +39,10 @@ class DatabaseService {
   static const String _tableTrx = 'transactions';
   static const String _tableTrxItem = 'transaction_items';
 
-  /// Versi 1 = tabel menu (Sesi 2A). Versi 2 = tambah tabel transaksi (Sesi 2B).
-  static const int _dbVersion = 2;
+  /// Versi 1 = tabel menu (Sesi 2A).
+  /// Versi 2 = tambah tabel transaksi (Sesi 2B).
+  /// Versi 3 = tambah kolom `status` di transaksi untuk void (Sesi 3A).
+  static const int _dbVersion = 3;
 
   /// Mengambil koneksi database. Dibuat otomatis saat pertama kali dipakai.
   Future<Database> get database async {
@@ -50,10 +62,16 @@ class DatabaseService {
         await _createMenuTable(db);
         await _createTransactionTables(db);
       },
-      // Pengguna lama (versi 1): tambah tabel transaksi, data menu tetap aman.
+      // Pengguna lama: naikkan versi tanpa menghapus data.
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
+          // Dari versi 1: tabel transaksi belum ada (sudah termasuk kolom status).
           await _createTransactionTables(db);
+        } else if (oldVersion < 3) {
+          // Dari versi 2: tabel ada, tapi belum punya kolom status.
+          await db.execute(
+            "ALTER TABLE $_tableTrx ADD COLUMN status TEXT NOT NULL DEFAULT 'SUCCESS'",
+          );
         }
       },
     );
@@ -81,7 +99,8 @@ class DatabaseService {
         cashierName TEXT NOT NULL,
         total INTEGER NOT NULL,
         paidAmount INTEGER NOT NULL,
-        changeAmount INTEGER NOT NULL
+        changeAmount INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'SUCCESS'
       )
     ''');
     await db.execute('''
@@ -207,6 +226,88 @@ class DatabaseService {
         );
       }
       return trxId;
+    });
+  }
+
+  /// Mengambil riwayat transaksi, terbaru di atas.
+  ///
+  /// Isi [day] untuk hanya menampilkan transaksi pada tanggal tersebut.
+  /// Setiap transaksi sudah berisi daftar item-nya.
+  Future<List<TransactionModel>> getAllTransactions({DateTime? day}) async {
+    final db = await database;
+
+    String? where;
+    List<Object?>? whereArgs;
+    if (day != null) {
+      final start = DateTime(day.year, day.month, day.day);
+      final end = start.add(const Duration(days: 1));
+      where = 'createdAt >= ? AND createdAt < ?';
+      whereArgs = [start.millisecondsSinceEpoch, end.millisecondsSinceEpoch];
+    }
+
+    final rows = await db.query(
+      _tableTrx,
+      where: where,
+      whereArgs: whereArgs,
+      orderBy: 'createdAt DESC',
+    );
+
+    final result = <TransactionModel>[];
+    for (final row in rows) {
+      final itemRows = await db.query(
+        _tableTrxItem,
+        where: 'transactionId = ?',
+        whereArgs: [row['id']],
+      );
+      result.add(TransactionModel.fromMap(
+        row,
+        items: itemRows.map(TransactionItemModel.fromMap).toList(),
+      ));
+    }
+    return result;
+  }
+
+  /// Membatalkan (void) transaksi dan mengembalikan stok menu.
+  ///
+  /// Transaksi tidak dihapus, hanya ditandai 'VOID' agar tetap ada jejaknya.
+  /// Transaksi yang sudah VOID tidak bisa dibatalkan lagi, supaya stok
+  /// tidak bertambah dua kali. Semua langkah dalam satu transaksi database.
+  Future<void> voidTransaction(int transactionId) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        _tableTrx,
+        columns: ['status'],
+        where: 'id = ?',
+        whereArgs: [transactionId],
+      );
+      if (rows.isEmpty) {
+        throw const VoidException('Transaksi tidak ditemukan');
+      }
+      if (rows.first['status'] == 'VOID') {
+        throw const VoidException('Transaksi ini sudah dibatalkan');
+      }
+
+      final items = await txn.query(
+        _tableTrxItem,
+        where: 'transactionId = ?',
+        whereArgs: [transactionId],
+      );
+
+      // Kembalikan stok. Menu yang sudah dihapus dilewati begitu saja.
+      for (final item in items) {
+        await txn.rawUpdate(
+          'UPDATE $_tableMenu SET stock = stock + ? WHERE id = ?',
+          [item['qty'], item['menuId']],
+        );
+      }
+
+      await txn.update(
+        _tableTrx,
+        {'status': 'VOID'},
+        where: 'id = ?',
+        whereArgs: [transactionId],
+      );
     });
   }
 }
