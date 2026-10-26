@@ -2,21 +2,21 @@ import 'package:flutter/material.dart';
 
 import '../models/user_model.dart';
 import 'login_screen.dart';
-import 'menu_management_screen.dart';
+import 'pos_screen.dart';
 import 'transaction_history_screen.dart';
 
-/// Dashboard untuk Owner (akses penuh).
-/// Sesi 2A: ditambah tombol menuju halaman Kelola Menu & Stok.
-class OwnerDashboardScreen extends StatelessWidget {
+/// Dashboard untuk Kasir/Staff (akses terbatas).
+/// Sesi 2B: ditambah tombol menuju layar kasir (POS).
+class CashierDashboardScreen extends StatelessWidget {
   final UserModel user;
 
-  const OwnerDashboardScreen({super.key, required this.user});
+  const CashierDashboardScreen({super.key, required this.user});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Dashboard Owner'),
+        title: const Text('Dashboard Kasir'),
         actions: [
           IconButton(
             tooltip: 'Keluar',
@@ -31,10 +31,10 @@ class OwnerDashboardScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.verified_user, size: 72, color: Colors.deepOrange),
+              const Icon(Icons.point_of_sale, size: 72, color: Colors.deepOrange),
               const SizedBox(height: 16),
               const Text(
-                'Selamat Datang Owner - Akses Penuh',
+                'Selamat Datang Kasir - Akses Terbatas',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
@@ -42,16 +42,15 @@ class OwnerDashboardScreen extends StatelessWidget {
               Text(user.name, style: Theme.of(context).textTheme.bodyLarge),
               const SizedBox(height: 32),
 
-              // Tombol menuju halaman Kelola Menu & Stok (baru di Sesi 2A)
+              // Tombol menuju layar kasir (baru di Sesi 2B)
               FilledButton.icon(
                 onPressed: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => const MenuManagementScreen()),
+                    MaterialPageRoute(builder: (_) => PosScreen(user: user)),
                   );
                 },
-                icon: const Icon(Icons.restaurant_menu),
-                label: const Text('Kelola Menu & Stok'),
+                icon: const Icon(Icons.shopping_cart_checkout),
+                label: const Text('Mulai Transaksi'),
                 style: FilledButton.styleFrom(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
