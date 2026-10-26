@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import 'login_screen.dart';
 import 'menu_management_screen.dart';
+import 'transaction_history_screen.dart';
 
 /// Dashboard untuk Owner (akses penuh).
 /// Sesi 2A: ditambah tombol menuju halaman Kelola Menu & Stok.
@@ -52,6 +53,23 @@ class OwnerDashboardScreen extends StatelessWidget {
                 icon: const Icon(Icons.restaurant_menu),
                 label: const Text('Kelola Menu & Stok'),
                 style: FilledButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Tombol menuju riwayat transaksi (baru di Sesi 3A)
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => TransactionHistoryScreen(user: user)),
+                  );
+                },
+                icon: const Icon(Icons.receipt_long),
+                label: const Text('Riwayat Transaksi'),
+                style: OutlinedButton.styleFrom(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 ),
