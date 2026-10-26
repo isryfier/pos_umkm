@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../models/user_model.dart';
 import 'login_screen.dart';
+import 'menu_management_screen.dart';
 
 /// Dashboard untuk Owner (akses penuh).
-/// Sementara hanya menampilkan teks sambutan; fitur lengkap menyusul di sesi berikutnya.
+/// Sesi 2A: ditambah tombol menuju halaman Kelola Menu & Stok.
 class OwnerDashboardScreen extends StatelessWidget {
   final UserModel user;
 
@@ -38,6 +39,23 @@ class OwnerDashboardScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(user.name, style: Theme.of(context).textTheme.bodyLarge),
+              const SizedBox(height: 32),
+
+              // Tombol menuju halaman Kelola Menu & Stok (baru di Sesi 2A)
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => const MenuManagementScreen()),
+                  );
+                },
+                icon: const Icon(Icons.restaurant_menu),
+                label: const Text('Kelola Menu & Stok'),
+                style: FilledButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+              ),
             ],
           ),
         ),
