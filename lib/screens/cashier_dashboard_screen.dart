@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import 'login_screen.dart';
 import 'pos_screen.dart';
+import 'transaction_history_screen.dart';
 
 /// Dashboard untuk Kasir/Staff (akses terbatas).
 /// Sesi 2B: ditambah tombol menuju layar kasir (POS).
@@ -51,6 +52,23 @@ class CashierDashboardScreen extends StatelessWidget {
                 icon: const Icon(Icons.shopping_cart_checkout),
                 label: const Text('Mulai Transaksi'),
                 style: FilledButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Tombol menuju riwayat transaksi (baru di Sesi 3A)
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => TransactionHistoryScreen(user: user)),
+                  );
+                },
+                icon: const Icon(Icons.receipt_long),
+                label: const Text('Riwayat Transaksi'),
+                style: OutlinedButton.styleFrom(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 ),
