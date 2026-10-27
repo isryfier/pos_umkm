@@ -52,12 +52,17 @@ jobs:
       - name: Build APK release
         run: flutter build apk --release
 
-      - name: Tampilkan sidik jari kunci (untuk memastikan sama tiap build)
-        run: |
-          keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk | grep -E "SHA256" || true
-
       - name: Unggah APK
         uses: actions/upload-artifact@v4
         with:
           name: pos-kuliner-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      # Ditaruh setelah unggah, jadi kalau langkah ini gagal APK tetap tersimpan.
+      # Sidik jari kunci harus SAMA di setiap build. Untuk kunci tetap kita,
+      # nilai SHA-256 diawali: d850a739
+      - name: Tampilkan sidik jari kunci (untuk memastikan sama tiap build)
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | grep -i "SHA-256"
+          
