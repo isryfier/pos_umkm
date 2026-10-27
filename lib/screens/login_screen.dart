@@ -81,9 +81,9 @@ class _LoginScreenState extends State<LoginScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
-                child: Form(
-                 key: _formKey,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
+              child: Form(
+                key: _formKey,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -105,7 +105,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Masuk untuk mulai berjualan (v4)',
+                      'Masuk untuk mulai berjualan',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
@@ -167,22 +167,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           : const Text('MASUK',
                               style: TextStyle(
                                   fontSize: 16, fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Petunjuk akun demo (hapus pada versi produksi)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Text(
-                        'Akun demo:\n'
-                        'Owner  -> owner / owner123\n'
-                        'Kasir  -> kasir / kasir123',
-                        style: TextStyle(fontSize: 13, height: 1.5),
-                      ),
                     ),
                   ],
                 ),
