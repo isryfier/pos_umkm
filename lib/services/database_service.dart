@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../models/menu_model.dart';
+import '../models/report_model.dart';
 import '../models/transaction_model.dart';
 
 /// Dilempar saat stok tidak cukup atau menu sudah dihapus ketika transaksi disimpan.
@@ -309,5 +310,93 @@ class DatabaseService {
         whereArgs: [transactionId],
       );
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // LAPORAN
+  // ---------------------------------------------------------------------------
+
+  /// Menyusun laporan penjualan dari tanggal [from] sampai [to] (keduanya
+  /// ikut dihitung penuh, dari jam 00:00 hari pertama sampai akhir hari terakhir).
+  /// Transaksi VOID tidak dihitung sebagai penjualan, hanya dihitung jumlahnya.
+  Future<SalesReport> getSalesReport({
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final db = await database;
+    final start = DateTime(from.year, from.month, from.day);
+    final end = DateTime(to.year, to.month, to.day + 1);
+    final args = [start.millisecondsSinceEpoch, end.millisecondsSinceEpoch];
+
+    final trxRows = await db.query(
+      _tableTrx,
+      columns: ['createdAt', 'total', 'status'],
+      where: 'createdAt >= ? AND createdAt < ?',
+      whereArgs: args,
+    );
+
+    // Siapkan semua hari dalam rentang dengan nilai 0: [total, jumlah transaksi].
+    final byDay = <DateTime, List<int>>{};
+    for (var d = start; d.isBefore(end); d = DateTime(d.year, d.month, d.day + 1)) {
+      byDay[d] = [0, 0];
+    }
+
+    int totalSales = 0;
+    int trxCount = 0;
+    int voidCount = 0;
+    for (final row in trxRows) {
+      if (row['status'] == 'VOID') {
+        voidCount++;
+        continue;
+      }
+      final total = row['total'] as int;
+      final t = DateTime.fromMillisecondsSinceEpoch(row['createdAt'] as int);
+      final slot = byDay[DateTime(t.year, t.month, t.day)];
+      if (slot != null) {
+        slot[0] += total;
+        slot[1] += 1;
+      }
+      totalSales += total;
+      trxCount++;
+    }
+
+    // Menu terlaris: dijumlahkan dari item transaksi yang tidak di-void.
+    final itemRows = await db.rawQuery('''
+      SELECT i.menuName AS name,
+             SUM(i.qty) AS qty,
+             SUM(i.qty * i.price) AS revenue
+      FROM $_tableTrxItem i
+      JOIN $_tableTrx t ON t.id = i.transactionId
+      WHERE t.createdAt >= ? AND t.createdAt < ? AND t.status != 'VOID'
+      GROUP BY i.menuId, i.menuName
+      ORDER BY qty DESC, revenue DESC
+    ''', args);
+
+    int itemsSold = 0;
+    final topMenus = <TopMenu>[];
+    for (final r in itemRows) {
+      final qty = r['qty'] as int;
+      itemsSold += qty;
+      topMenus.add(TopMenu(
+        name: r['name'] as String,
+        qty: qty,
+        revenue: r['revenue'] as int,
+      ));
+    }
+
+    return SalesReport(
+      totalSales: totalSales,
+      trxCount: trxCount,
+      voidCount: voidCount,
+      itemsSold: itemsSold,
+      daily: byDay.entries
+          .map((e) => DailySales(
+                day: e.key,
+                total: e.value[0],
+                count: e.value[1],
+              ))
+          .toList(),
+      topMenus: topMenus,
+    );
   }
 }
