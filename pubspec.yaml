@@ -1,5 +1,5 @@
 name: pos_kuliner
-description: Aplikasi kasir (POS) UMKM Kuliner - Sesi 2A (Database & Kelola Menu).
+description: Aplikasi kasir (POS) UMKM Kuliner.
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -13,6 +13,8 @@ dependencies:
   sqflite: ^2.3.3
   # Membantu menentukan lokasi file database
   path: ^1.9.0
+  # Hash SHA-256 untuk menyimpan password & PIN dengan aman (Sesi 5)
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:
@@ -21,3 +23,4 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  
