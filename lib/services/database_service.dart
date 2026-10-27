@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/menu_model.dart';
 import '../models/report_model.dart';
 import '../models/transaction_model.dart';
+import '../utils/security.dart';
 
 /// Dilempar saat stok tidak cukup atau menu sudah dihapus ketika transaksi disimpan.
 class StockException implements Exception {
@@ -39,11 +40,13 @@ class DatabaseService {
   static const String _tableMenu = 'menu';
   static const String _tableTrx = 'transactions';
   static const String _tableTrxItem = 'transaction_items';
+  static const String _tableUsers = 'users';
 
   /// Versi 1 = tabel menu (Sesi 2A).
   /// Versi 2 = tambah tabel transaksi (Sesi 2B).
   /// Versi 3 = tambah kolom `status` di transaksi untuk void (Sesi 3A).
-  static const int _dbVersion = 3;
+  /// Versi 4 = tambah tabel `users` untuk akun owner/kasir (Sesi 5).
+  static const int _dbVersion = 4;
 
   /// Mengambil koneksi database. Dibuat otomatis saat pertama kali dipakai.
   Future<Database> get database async {
@@ -62,6 +65,8 @@ class DatabaseService {
       onCreate: (db, version) async {
         await _createMenuTable(db);
         await _createTransactionTables(db);
+        await _createUserTable(db);
+        await _seedOwner(db);
       },
       // Pengguna lama: naikkan versi tanpa menghapus data.
       onUpgrade: (db, oldVersion, newVersion) async {
@@ -73,6 +78,11 @@ class DatabaseService {
           await db.execute(
             "ALTER TABLE $_tableTrx ADD COLUMN status TEXT NOT NULL DEFAULT 'SUCCESS'",
           );
+        }
+        if (oldVersion < 4) {
+          // Tabel akun baru + satu akun owner awal. Data lain tidak disentuh.
+          await _createUserTable(db);
+          await _seedOwner(db);
         }
       },
     );
@@ -397,6 +407,95 @@ class DatabaseService {
               ))
           .toList(),
       topMenus: topMenus,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // AKUN PENGGUNA
+  // Catatan: nilai password/PIN yang masuk ke sini sudah berupa hash
+  // (lihat AuthService dan utils/security.dart).
+  // ---------------------------------------------------------------------------
+
+  Future<void> _createUserTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE $_tableUsers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        passwordHash TEXT NOT NULL,
+        pinHash TEXT
+      )
+    ''');
+  }
+
+  /// Membuat akun owner awal: username `owner`, password `owner123`, PIN `123456`.
+  /// Owner wajib mengganti ketiganya lewat menu Kelola Akun setelah login pertama.
+  Future<void> _seedOwner(Database db) async {
+    final salt = Security.generateSalt();
+    await db.insert(_tableUsers, {
+      'username': 'owner',
+      'name': 'Owner',
+      'role': 'owner',
+      'salt': salt,
+      'passwordHash': Security.hash(salt, 'pw', 'owner123'),
+      'pinHash': Security.hash(salt, 'pin', '123456'),
+    });
+  }
+
+  /// Mencari akun berdasarkan username (tidak peka huruf besar/kecil).
+  Future<Map<String, Object?>?> findUser(String username) async {
+    final db = await database;
+    final rows = await db.query(
+      _tableUsers,
+      where: 'username = ?',
+      whereArgs: [username],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<Map<String, Object?>?> getUserById(int id) async {
+    final db = await database;
+    final rows = await db.query(
+      _tableUsers,
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Mengambil semua akun dengan peran tertentu ('owner' atau 'staff').
+  Future<List<Map<String, Object?>>> getUsersByRole(String role) async {
+    final db = await database;
+    return db.query(
+      _tableUsers,
+      where: 'role = ?',
+      whereArgs: [role],
+      orderBy: 'name COLLATE NOCASE ASC',
+    );
+  }
+
+  Future<int> insertUser(Map<String, Object?> values) async {
+    final db = await database;
+    return db.insert(_tableUsers, values);
+  }
+
+  Future<int> updateUser(int id, Map<String, Object?> values) async {
+    final db = await database;
+    return db.update(_tableUsers, values, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Menghapus akun kasir. Akun owner tidak bisa dihapus lewat fungsi ini.
+  /// Riwayat transaksi tetap utuh karena nama kasir tersimpan di setiap transaksi.
+  Future<int> deleteStaff(int id) async {
+    final db = await database;
+    return db.delete(
+      _tableUsers,
+      where: 'id = ? AND role = ?',
+      whereArgs: [id, 'staff'],
     );
   }
 }
