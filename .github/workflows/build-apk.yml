@@ -23,6 +23,23 @@ jobs:
         with:
           channel: stable
 
+      # Memasang kunci tanda tangan TETAP dari GitHub Secrets.
+      # Dengan kunci yang sama di setiap build, APK baru bisa menimpa APK lama
+      # tanpa uninstall (data menu & transaksi tetap aman).
+      # Kunci ditaruh di lokasi debug.keystore, yang otomatis dipakai Flutter
+      # untuk menandatangani APK, jadi file gradle tidak perlu diubah.
+      - name: Pasang kunci tanda tangan tetap
+        env:
+          KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p ~/.android
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+            echo "Kunci tetap terpasang."
+          else
+            echo "::warning::Secret DEBUG_KEYSTORE_BASE64 belum diatur. APK memakai kunci acak (tidak bisa menimpa versi lama)."
+          fi
+
       - name: Buat folder android jika belum ada
         run: |
           if [ ! -d android ]; then
@@ -34,6 +51,10 @@ jobs:
 
       - name: Build APK release
         run: flutter build apk --release
+
+      - name: Tampilkan sidik jari kunci (untuk memastikan sama tiap build)
+        run: |
+          keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk | grep -E "SHA256" || true
 
       - name: Unggah APK
         uses: actions/upload-artifact@v4
