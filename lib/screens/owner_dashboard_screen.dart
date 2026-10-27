@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import 'login_screen.dart';
 import 'menu_management_screen.dart';
+import 'sales_report_screen.dart';
 import 'transaction_history_screen.dart';
 
 /// Dashboard untuk Owner (akses penuh).
@@ -69,6 +70,23 @@ class OwnerDashboardScreen extends StatelessWidget {
                 },
                 icon: const Icon(Icons.receipt_long),
                 label: const Text('Riwayat Transaksi'),
+                style: OutlinedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Tombol menuju laporan penjualan (baru di Sesi 4, khusus Owner)
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => const SalesReportScreen()),
+                  );
+                },
+                icon: const Icon(Icons.bar_chart),
+                label: const Text('Laporan Penjualan'),
                 style: OutlinedButton.styleFrom(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
