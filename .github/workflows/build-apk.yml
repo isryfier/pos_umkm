@@ -55,6 +55,24 @@ jobs:
       - name: Ambil dependency
         run: flutter pub get
 
+      # Beberapa paket Android (mis. file_picker) masih dibuat untuk API lama,
+      # padahal pustaka pendampingnya mensyaratkan API 36. Skrip init Gradle ini
+      # menaikkan compileSdk semua modul ke 36 supaya tidak error.
+      - name: Naikkan compileSdk semua paket ke 36
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/force-compile-sdk.gradle <<'EOF'
+          allprojects {
+            afterEvaluate { p ->
+              def androidExt = p.extensions.findByName('android')
+              if (androidExt != null) {
+                androidExt.compileSdk = 36
+              }
+            }
+          }
+          EOF
+          echo "Init script terpasang:" && cat ~/.gradle/init.d/force-compile-sdk.gradle
+
       - name: Build APK release
         run: flutter build apk --release
 
@@ -83,4 +101,3 @@ jobs:
             echo "== $f"
             keytool -list -keystore "$f" -storepass android 2>&1 | grep -i "SHA-256"
           done
-          
