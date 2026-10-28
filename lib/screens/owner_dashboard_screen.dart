@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
 import 'account_management_screen.dart';
+import 'backup_screen.dart';
 import 'login_screen.dart';
 import 'menu_management_screen.dart';
 import 'sales_report_screen.dart';
@@ -155,6 +156,22 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                 onPressed: _openAccounts,
                 icon: const Icon(Icons.manage_accounts),
                 label: const Text('Kelola Akun'),
+                style: OutlinedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Backup & pulihkan data
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const BackupScreen()),
+                  );
+                },
+                icon: const Icon(Icons.backup_outlined),
+                label: const Text('Backup & Pulihkan'),
                 style: OutlinedButton.styleFrom(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
