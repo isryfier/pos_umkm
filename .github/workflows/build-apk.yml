@@ -57,7 +57,7 @@ jobs:
       # Untuk mengganti nama aplikasi, ubah tulisan "POS Kasir" di baris sed berikut.
       - name: Pasang nama dan ikon aplikasi
         run: |
-          sed -i 's/android:label="[^"]*"/android:label="POS Kasir"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="[^"]*"/android:label="POS Kuliner"/' android/app/src/main/AndroidManifest.xml
           if [ ! -f app_icon.png ]; then
             echo "::warning::app_icon.png tidak ditemukan di root repo. Memakai ikon bawaan Flutter."
             exit 0
