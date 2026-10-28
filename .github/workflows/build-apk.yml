@@ -52,6 +52,29 @@ jobs:
             flutter create --platforms=android --project-name pos_kuliner .
           fi
 
+      # Mengatur nama aplikasi di HP dan memasang ikon dari file app_icon.png
+      # (di root repo). Kalau file ikon tidak ada, build tetap jalan dengan ikon bawaan.
+      # Untuk mengganti nama aplikasi, ubah tulisan "POS Kasir" di baris sed berikut.
+      - name: Pasang nama dan ikon aplikasi
+        run: |
+          sed -i 's/android:label="[^"]*"/android:label="POS Kasir"/' android/app/src/main/AndroidManifest.xml
+          if [ ! -f app_icon.png ]; then
+            echo "::warning::app_icon.png tidak ditemukan di root repo. Memakai ikon bawaan Flutter."
+            exit 0
+          fi
+          python3 -m pip install --quiet --break-system-packages pillow || python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image
+          import os
+          src = Image.open('app_icon.png').convert('RGBA')
+          sizes = {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}
+          for density, size in sizes.items():
+              out = f'android/app/src/main/res/mipmap-{density}'
+              os.makedirs(out, exist_ok=True)
+              src.resize((size, size), Image.LANCZOS).save(f'{out}/ic_launcher.png')
+          print('Ikon terpasang di semua ukuran layar.')
+          PY
+
       - name: Ambil dependency
         run: flutter pub get
 
@@ -89,15 +112,3 @@ jobs:
         run: |
           APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | grep -i "SHA-256"
-
-      # Diagnosa sementara: mencari semua file debug.keystore di mesin build
-      # dan menampilkan sidik jarinya, untuk tahu kunci mana yang dipakai Gradle.
-      - name: Diagnosa lokasi kunci
-        continue-on-error: true
-        run: |
-          echo "HOME=$HOME"
-          echo "ANDROID_USER_HOME=$ANDROID_USER_HOME ANDROID_SDK_HOME=$ANDROID_SDK_HOME"
-          find /home/runner -name "debug.keystore" 2>/dev/null | while read f; do
-            echo "== $f"
-            keytool -list -keystore "$f" -storepass android 2>&1 | grep -i "SHA-256"
-          done
