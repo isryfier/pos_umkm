@@ -48,6 +48,9 @@ class DatabaseService {
   /// Versi 4 = tambah tabel `users` untuk akun owner/kasir (Sesi 5).
   static const int _dbVersion = 4;
 
+  /// Versi struktur database saat ini (dipakai untuk memeriksa file backup).
+  static const int schemaVersion = _dbVersion;
+
   /// Mengambil koneksi database. Dibuat otomatis saat pertama kali dipakai.
   Future<Database> get database async {
     _db ??= await _initDb();
@@ -497,5 +500,23 @@ class DatabaseService {
       where: 'id = ? AND role = ?',
       whereArgs: [id, 'staff'],
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // BACKUP & PULIHKAN (dipakai oleh BackupService)
+  // ---------------------------------------------------------------------------
+
+  /// Lokasi file database di HP.
+  Future<String> databaseFilePath() async {
+    return join(await getDatabasesPath(), _dbName);
+  }
+
+  /// Menutup koneksi database. Koneksi dibuka lagi otomatis saat dibutuhkan.
+  Future<void> close() async {
+    final db = _db;
+    _db = null;
+    if (db != null && db.isOpen) {
+      await db.close();
+    }
   }
 }
