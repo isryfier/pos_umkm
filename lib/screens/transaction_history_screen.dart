@@ -141,7 +141,8 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                            '${item.menuName}\n${item.qty} x ${formatRupiah(item.price)}'),
+                            '${item.menuName}\n${item.qty} x ${formatRupiah(item.price)}'
+                            '${item.hasNote ? '\nCatatan: ${item.note}' : ''}'),
                       ),
                       Text(formatRupiah(item.subtotal)),
                     ],
