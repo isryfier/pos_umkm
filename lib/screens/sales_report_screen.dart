@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../models/payment.dart';
 import '../models/report_model.dart';
 import '../services/database_service.dart';
+import '../services/export_service.dart';
 import '../utils/format.dart';
 
 /// Pilihan rentang waktu laporan.
@@ -90,6 +93,30 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
     });
   }
 
+  /// Membuat file CSV untuk rentang yang sedang dipilih, lalu membuka menu bagikan.
+  Future<void> _export() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final path = await ExportService().createSalesCsv(from: _from, to: _to);
+      if (path == null) {
+        messenger.showSnackBar(const SnackBar(
+          content: Text('Tidak ada data untuk diekspor pada periode ini'),
+          behavior: SnackBarBehavior.floating,
+        ));
+        return;
+      }
+      await Share.shareXFiles(
+        [XFile(path, mimeType: 'text/csv')],
+        subject: 'Laporan penjualan $_rangeLabel',
+      );
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Gagal membuat file ekspor'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
   String _two(int n) => n.toString().padLeft(2, '0');
   String _dmy(DateTime d) => '${_two(d.day)}/${_two(d.month)}/${d.year}';
   String _dm(DateTime d) => '${_two(d.day)}/${_two(d.month)}';
@@ -105,7 +132,16 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
     final report = _report;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Laporan Penjualan')),
+      appBar: AppBar(
+        title: const Text('Laporan Penjualan'),
+        actions: [
+          IconButton(
+            tooltip: 'Ekspor ke Excel (CSV)',
+            icon: const Icon(Icons.ios_share),
+            onPressed: _export,
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
@@ -140,6 +176,9 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
             )
           else ...[
             _summary(report),
+            const SizedBox(height: 20),
+            _sectionTitle('Metode pembayaran'),
+            _methodList(report),
             const SizedBox(height: 20),
             _sectionTitle('Penjualan per hari'),
             _dailyList(report),
@@ -228,6 +267,61 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
               value,
               style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Total per metode bayar; QRIS dirinci per aplikasi/bank.
+  Widget _methodList(SalesReport r) {
+    final totals = <String, int>{};
+    final counts = <String, int>{};
+    for (final m in r.byMethod) {
+      totals[m.method] = (totals[m.method] ?? 0) + m.total;
+      counts[m.method] = (counts[m.method] ?? 0) + m.count;
+    }
+    final style = const TextStyle(fontWeight: FontWeight.w600);
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          children: [
+            for (final method in PaymentMethod.all)
+              if (totals.containsKey(method)) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${PaymentMethod.label(method)}  (${counts[method]} transaksi)',
+                          style: style,
+                        ),
+                      ),
+                      Text(formatRupiah(totals[method]!), style: style),
+                    ],
+                  ),
+                ),
+                if (method == PaymentMethod.qris)
+                  for (final m in r.byMethod.where(
+                      (x) => x.method == PaymentMethod.qris && x.channel != null))
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 2, 0, 2),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text('${m.channel}  (${m.count})',
+                                style: const TextStyle(fontSize: 13)),
+                          ),
+                          Text(formatRupiah(m.total),
+                              style: const TextStyle(fontSize: 13)),
+                        ],
+                      ),
+                    ),
+              ],
           ],
         ),
       ),
