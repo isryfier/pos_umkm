@@ -8,7 +8,14 @@ class CartItem {
   /// Jumlah porsi yang dibeli.
   int qty;
 
-  CartItem({required this.menu, this.qty = 1});
+  /// Catatan pesanan untuk baris ini, misalnya "tanpa gula". Kosong jika tidak ada.
+  String note;
+
+  CartItem({required this.menu, this.qty = 1, this.note = ''});
+
+  /// Kunci unik baris keranjang: menu yang sama dengan catatan berbeda
+  /// menjadi baris terpisah (mis. 1 kopi biasa + 1 kopi tanpa gula).
+  String get key => '${menu.id}|$note';
 
   /// Subtotal = harga x jumlah.
   int get subtotal => menu.price * qty;
@@ -25,6 +32,9 @@ class TransactionItemModel {
   final int price;
   final int qty;
 
+  /// Catatan pesanan (null jika tidak ada).
+  final String? note;
+
   const TransactionItemModel({
     this.id,
     this.transactionId,
@@ -32,9 +42,13 @@ class TransactionItemModel {
     required this.menuName,
     required this.price,
     required this.qty,
+    this.note,
   });
 
   int get subtotal => price * qty;
+
+  /// True jika item ini punya catatan.
+  bool get hasNote => note != null && note!.trim().isNotEmpty;
 
   factory TransactionItemModel.fromMap(Map<String, dynamic> map) {
     return TransactionItemModel(
@@ -44,6 +58,7 @@ class TransactionItemModel {
       menuName: map['menuName'] as String,
       price: map['price'] as int,
       qty: map['qty'] as int,
+      note: map['note'] as String?,
     );
   }
 
@@ -56,6 +71,7 @@ class TransactionItemModel {
       'menuName': menuName,
       'price': price,
       'qty': qty,
+      'note': note,
     };
   }
 }
