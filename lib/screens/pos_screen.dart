@@ -590,4 +590,55 @@ class _PaymentDialogState extends State<_PaymentDialog> {
               controller: _controller,
               autofocus: true,
               keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextI
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                labelText: 'Uang diterima',
+                prefixText: 'Rp ',
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                ActionChip(
+                  label: const Text('Uang pas'),
+                  onPressed: () => _setPaid(widget.total),
+                ),
+                for (final v in [10000, 20000, 50000, 100000])
+                  ActionChip(
+                    label: Text(formatRupiah(v)),
+                    onPressed: () => _setPaid(v),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _paid == 0
+                  ? 'Masukkan uang diterima'
+                  : enough
+                      ? 'Kembalian: ${formatRupiah(_paid - widget.total)}'
+                      : 'Kurang: ${formatRupiah(widget.total - _paid)}',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: _paid == 0
+                    ? null
+                    : (enough ? Colors.green.shade700 : Colors.red),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Batal'),
+        ),
+        FilledButton(
+          onPressed: enough ? () => Navigator.pop(context, _paid) : null,
+          child: const Text('Proses'),
+        ),
+      ],
+    );
+  }
+}
