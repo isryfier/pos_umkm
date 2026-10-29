@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/menu_model.dart';
+import '../models/payment.dart';
 import '../models/transaction_model.dart';
 import '../models/user_model.dart';
 import '../services/database_service.dart';
@@ -311,11 +312,12 @@ class _PosScreenState extends State<PosScreen> {
     if (_cart.isEmpty) return;
 
     final total = _total;
-    final paid = await showDialog<int>(
+    final pay = await showDialog<_PaymentResult>(
       context: context,
       builder: (_) => _PaymentDialog(total: total),
     );
-    if (paid == null) return; // dibatalkan
+    if (pay == null) return; // dibatalkan
+    final paid = pay.paid;
 
     try {
       final invoiceNo = await _db.generateInvoiceNo();
@@ -328,6 +330,8 @@ class _PosScreenState extends State<PosScreen> {
         total: total,
         paidAmount: paid,
         changeAmount: change,
+        paymentMethod: pay.method,
+        paymentChannel: pay.channel,
         items: _cart.values
             .map((c) => TransactionItemModel(
                   menuId: c.menu.id!,
@@ -339,7 +343,7 @@ class _PosScreenState extends State<PosScreen> {
             .toList(),
       );
 
-      await _db.insertTransaction(trx);
+      final saved = await _db.insertTransaction(trx);
       if (!mounted) return;
 
       setState(() => _cart.clear());
@@ -354,16 +358,24 @@ class _PosScreenState extends State<PosScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(invoiceNo),
+              const Text('No. Antrian'),
+              Text(
+                saved.queueNo.toString().padLeft(3, '0'),
+                style: const TextStyle(fontSize: 44, fontWeight: FontWeight.bold),
+              ),
+              Text(invoiceNo, style: const TextStyle(fontSize: 12)),
               const SizedBox(height: 12),
               Text('Total: ${formatRupiah(total)}'),
-              Text('Dibayar: ${formatRupiah(paid)}'),
-              const SizedBox(height: 4),
-              Text(
-                'Kembalian: ${formatRupiah(change)}',
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
+              Text('Bayar: ${paymentLabel(pay.method, pay.channel)}'),
+              if (pay.method == PaymentMethod.cash) ...[
+                Text('Dibayar: ${formatRupiah(paid)}'),
+                const SizedBox(height: 4),
+                Text(
+                  'Kembalian: ${formatRupiah(change)}',
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
             ],
           ),
           actions: [
@@ -569,8 +581,20 @@ class _PosScreenState extends State<PosScreen> {
   }
 }
 
-/// Dialog pembayaran tunai. Mengembalikan jumlah uang diterima (int),
-/// atau null jika dibatalkan.
+/// Hasil dialog pembayaran.
+class _PaymentResult {
+  final String method;
+  final String? channel;
+
+  /// Uang diterima. Untuk non-tunai sama dengan total.
+  final int paid;
+
+  const _PaymentResult(this.method, this.channel, this.paid);
+}
+
+/// Dialog pembayaran: pilih Tunai / QRIS / Transfer.
+/// Tunai meminta uang diterima; QRIS meminta memilih aplikasi/bank.
+/// Mengembalikan [_PaymentResult], atau null jika dibatalkan.
 class _PaymentDialog extends StatefulWidget {
   final int total;
 
@@ -582,6 +606,9 @@ class _PaymentDialog extends StatefulWidget {
 
 class _PaymentDialogState extends State<_PaymentDialog> {
   final _controller = TextEditingController();
+
+  String _method = PaymentMethod.cash;
+  String? _channel;
 
   int get _paid => int.tryParse(_controller.text) ?? 0;
 
@@ -596,12 +623,29 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     setState(() {});
   }
 
+  bool get _canSubmit {
+    switch (_method) {
+      case PaymentMethod.cash:
+        return _paid >= widget.total;
+      case PaymentMethod.qris:
+        return _channel != null;
+      default:
+        return true;
+    }
+  }
+
+  void _submit() {
+    final paid = _method == PaymentMethod.cash ? _paid : widget.total;
+    final channel = _method == PaymentMethod.qris ? _channel : null;
+    Navigator.pop(context, _PaymentResult(_method, channel, paid));
+  }
+
   @override
   Widget build(BuildContext context) {
     final enough = _paid >= widget.total;
 
     return AlertDialog(
-      title: const Text('Pembayaran Tunai'),
+      title: const Text('Pembayaran'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -612,46 +656,73 @@ class _PaymentDialogState extends State<_PaymentDialog> {
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: 'Uang diterima',
-                prefixText: 'Rp ',
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                ActionChip(
-                  label: const Text('Uang pas'),
-                  onPressed: () => _setPaid(widget.total),
-                ),
-                for (final v in [10000, 20000, 50000, 100000])
-                  ActionChip(
-                    label: Text(formatRupiah(v)),
-                    onPressed: () => _setPaid(v),
-                  ),
+            SegmentedButton<String>(
+              showSelectedIcon: false,
+              segments: [
+                for (final m in PaymentMethod.all)
+                  ButtonSegment(value: m, label: Text(PaymentMethod.label(m))),
               ],
+              selected: {_method},
+              onSelectionChanged: (s) => setState(() => _method = s.first),
             ),
             const SizedBox(height: 12),
-            Text(
-              _paid == 0
-                  ? 'Masukkan uang diterima'
-                  : enough
-                      ? 'Kembalian: ${formatRupiah(_paid - widget.total)}'
-                      : 'Kurang: ${formatRupiah(widget.total - _paid)}',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: _paid == 0
-                    ? null
-                    : (enough ? Colors.green.shade700 : Colors.red),
+            if (_method == PaymentMethod.cash) ...[
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'Uang diterima',
+                  prefixText: 'Rp ',
+                ),
+                onChanged: (_) => setState(() {}),
               ),
-            ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ActionChip(
+                    label: const Text('Uang pas'),
+                    onPressed: () => _setPaid(widget.total),
+                  ),
+                  for (final v in [10000, 20000, 50000, 100000])
+                    ActionChip(
+                      label: Text(formatRupiah(v)),
+                      onPressed: () => _setPaid(v),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _paid == 0
+                    ? 'Masukkan uang diterima'
+                    : enough
+                        ? 'Kembalian: ${formatRupiah(_paid - widget.total)}'
+                        : 'Kurang: ${formatRupiah(widget.total - _paid)}',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: _paid == 0
+                      ? null
+                      : (enough ? Colors.green.shade700 : Colors.red),
+                ),
+              ),
+            ] else if (_method == PaymentMethod.qris) ...[
+              const Text('Dibayar lewat:'),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final c in qrisChannels)
+                    ChoiceChip(
+                      label: Text(c),
+                      selected: _channel == c,
+                      onSelected: (_) => setState(() => _channel = c),
+                    ),
+                ],
+              ),
+            ] else
+              const Text('Pastikan transfer sudah masuk sebelum menekan Proses.'),
           ],
         ),
       ),
@@ -661,7 +732,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
           child: const Text('Batal'),
         ),
         FilledButton(
-          onPressed: enough ? () => Navigator.pop(context, _paid) : null,
+          onPressed: _canSubmit ? _submit : null,
           child: const Text('Proses'),
         ),
       ],
