@@ -592,4 +592,53 @@ class DatabaseService {
     return rows.isEmpty ? null : rows.first;
   }
 
-  /// Mengambil semua akun dengan peran t
+  /// Mengambil semua akun dengan peran tertentu ('owner' atau 'staff').
+  Future<List<Map<String, Object?>>> getUsersByRole(String role) async {
+    final db = await database;
+    return db.query(
+      _tableUsers,
+      where: 'role = ?',
+      whereArgs: [role],
+      orderBy: 'name COLLATE NOCASE ASC',
+    );
+  }
+
+  Future<int> insertUser(Map<String, Object?> values) async {
+    final db = await database;
+    return db.insert(_tableUsers, values);
+  }
+
+  Future<int> updateUser(int id, Map<String, Object?> values) async {
+    final db = await database;
+    return db.update(_tableUsers, values, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Menghapus akun kasir. Akun owner tidak bisa dihapus lewat fungsi ini.
+  /// Riwayat transaksi tetap utuh karena nama kasir tersimpan di setiap transaksi.
+  Future<int> deleteStaff(int id) async {
+    final db = await database;
+    return db.delete(
+      _tableUsers,
+      where: 'id = ? AND role = ?',
+      whereArgs: [id, 'staff'],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // BACKUP & PULIHKAN (dipakai oleh BackupService)
+  // ---------------------------------------------------------------------------
+
+  /// Lokasi file database di HP.
+  Future<String> databaseFilePath() async {
+    return join(await getDatabasesPath(), _dbName);
+  }
+
+  /// Menutup koneksi database. Koneksi dibuka lagi otomatis saat dibutuhkan.
+  Future<void> close() async {
+    final db = _db;
+    _db = null;
+    if (db != null && db.isOpen) {
+      await db.close();
+    }
+  }
+}
