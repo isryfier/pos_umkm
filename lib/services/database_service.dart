@@ -25,6 +25,16 @@ class VoidException implements Exception {
   String toString() => message;
 }
 
+/// Dilempar saat operasi kategori tidak bisa dilakukan
+/// (nama kembar, atau kategori masih dipakai menu).
+class CategoryException implements Exception {
+  final String message;
+  const CategoryException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 /// Pengelola database SQLite lokal.
 ///
 /// Memakai pola singleton: seluruh aplikasi berbagi satu koneksi database
@@ -41,13 +51,15 @@ class DatabaseService {
   static const String _tableTrx = 'transactions';
   static const String _tableTrxItem = 'transaction_items';
   static const String _tableUsers = 'users';
+  static const String _tableCategories = 'categories';
 
   /// Versi 1 = tabel menu (Sesi 2A).
   /// Versi 2 = tambah tabel transaksi (Sesi 2B).
   /// Versi 3 = tambah kolom `status` di transaksi untuk void (Sesi 3A).
   /// Versi 4 = tambah tabel `users` untuk akun owner/kasir (Sesi 5).
   /// Versi 5 = tambah kolom `note` di item transaksi untuk catatan pesanan (Sesi 7).
-  static const int _dbVersion = 5;
+  /// Versi 6 = kategori menu bebas (tabel `categories`) + kolom `trackStock` (stok tak terbatas).
+  static const int _dbVersion = 6;
 
   /// Versi struktur database saat ini (dipakai untuk memeriksa file backup).
   static const int schemaVersion = _dbVersion;
@@ -68,6 +80,7 @@ class DatabaseService {
       // Instalasi baru: buat semua tabel.
       onCreate: (db, version) async {
         await _createMenuTable(db);
+        await _createCategoryTable(db);
         await _createTransactionTables(db);
         await _createUserTable(db);
         await _seedOwner(db);
@@ -91,6 +104,17 @@ class DatabaseService {
             );
           }
         }
+        if (oldVersion < 6) {
+          // Stok tak terbatas + kategori bebas. Data menu lama tidak berubah.
+          await db.execute(
+            'ALTER TABLE $_tableMenu ADD COLUMN trackStock INTEGER NOT NULL DEFAULT 1',
+          );
+          await db.execute(
+              "UPDATE $_tableMenu SET category = 'Makanan' WHERE category = 'makanan'");
+          await db.execute(
+              "UPDATE $_tableMenu SET category = 'Minuman' WHERE category = 'minuman'");
+          await _createCategoryTable(db);
+        }
         if (oldVersion < 4) {
           // Tabel akun baru + satu akun owner awal. Data lain tidak disentuh.
           await _createUserTable(db);
@@ -108,9 +132,29 @@ class DatabaseService {
         price INTEGER NOT NULL,
         category TEXT NOT NULL,
         stock INTEGER NOT NULL,
-        isAvailable INTEGER NOT NULL DEFAULT 1
+        isAvailable INTEGER NOT NULL DEFAULT 1,
+        trackStock INTEGER NOT NULL DEFAULT 1
       )
     ''');
+  }
+
+  /// Tabel kategori + isi awal: Makanan & Minuman, ditambah kategori lain
+  /// yang sudah dipakai menu lama (kalau ada).
+  Future<void> _createCategoryTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE $_tableCategories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+      )
+    ''');
+    await db.insert(_tableCategories, {'name': 'Makanan'});
+    await db.insert(_tableCategories, {'name': 'Minuman'});
+    final used = await db.rawQuery(
+        'SELECT DISTINCT category FROM $_tableMenu');
+    for (final r in used) {
+      await db.insert(_tableCategories, {'name': r['category']},
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
   }
 
   Future<void> _createTransactionTables(Database db) async {
@@ -149,14 +193,74 @@ class DatabaseService {
     return db.insert(_tableMenu, menu.toMap());
   }
 
+  // ---------------------------------------------------------------------------
+  // KATEGORI
+  // ---------------------------------------------------------------------------
+
+  /// Daftar nama kategori sesuai urutan dibuat.
+  Future<List<String>> getCategories() async {
+    final db = await database;
+    final rows = await db.query(_tableCategories, orderBy: 'id ASC');
+    return rows.map((r) => r['name'] as String).toList();
+  }
+
+  /// Jumlah menu per kategori (kunci = nama kategori).
+  Future<Map<String, int>> getCategoryCounts() async {
+    final db = await database;
+    final rows = await db.rawQuery(
+        'SELECT category, COUNT(*) AS n FROM $_tableMenu GROUP BY category');
+    return {for (final r in rows) r['category'] as String: r['n'] as int};
+  }
+
+  Future<void> addCategory(String name) async {
+    final clean = name.trim();
+    if (clean.isEmpty) throw const CategoryException('Nama kategori wajib diisi');
+    final db = await database;
+    try {
+      await db.insert(_tableCategories, {'name': clean});
+    } catch (_) {
+      throw CategoryException('Kategori "$clean" sudah ada');
+    }
+  }
+
+  /// Mengganti nama kategori; menu di dalamnya ikut pindah ke nama baru.
+  Future<void> renameCategory(String oldName, String newName) async {
+    final clean = newName.trim();
+    if (clean.isEmpty) throw const CategoryException('Nama kategori wajib diisi');
+    final db = await database;
+    await db.transaction((txn) async {
+      try {
+        await txn.update(_tableCategories, {'name': clean},
+            where: 'name = ?', whereArgs: [oldName]);
+      } catch (_) {
+        throw CategoryException('Kategori "$clean" sudah ada');
+      }
+      await txn.update(_tableMenu, {'category': clean},
+          where: 'category = ?', whereArgs: [oldName]);
+    });
+  }
+
+  /// Menghapus kategori. Ditolak kalau masih ada menu di dalamnya.
+  Future<void> deleteCategory(String name) async {
+    final db = await database;
+    final n = Sqflite.firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) FROM $_tableMenu WHERE category = ?', [name])) ??
+        0;
+    if (n > 0) {
+      throw CategoryException(
+          'Masih ada $n menu di "$name". Pindahkan atau hapus menunya dulu.');
+    }
+    await db.delete(_tableCategories, where: 'name = ?', whereArgs: [name]);
+  }
+
   /// Mengambil semua menu, diurutkan berdasarkan nama.
-  /// Isi [category] untuk memfilter hanya makanan atau hanya minuman.
-  Future<List<MenuModel>> getAllMenu({MenuCategory? category}) async {
+  /// Isi [category] untuk memfilter satu kategori saja.
+  Future<List<MenuModel>> getAllMenu({String? category}) async {
     final db = await database;
     final rows = await db.query(
       _tableMenu,
       where: category == null ? null : 'category = ?',
-      whereArgs: category == null ? null : [category.name],
+      whereArgs: category == null ? null : [category],
       orderBy: 'name COLLATE NOCASE ASC',
     );
     return rows.map(MenuModel.fromMap).toList();
@@ -231,15 +335,16 @@ class DatabaseService {
       for (final entry in needed.entries) {
         final rows = await txn.query(
           _tableMenu,
-          columns: ['stock'],
+          columns: ['stock', 'trackStock'],
           where: 'id = ?',
           whereArgs: [entry.key],
         );
         if (rows.isEmpty) {
           throw StockException('Menu "${names[entry.key]}" sudah dihapus');
         }
+        final tracked = ((rows.first['trackStock'] as int?) ?? 1) == 1;
         final stock = rows.first['stock'] as int;
-        if (stock < entry.value) {
+        if (tracked && stock < entry.value) {
           throw StockException(
               'Stok "${names[entry.key]}" tinggal $stock, tidak cukup');
         }
@@ -252,7 +357,7 @@ class DatabaseService {
       for (final item in trx.items) {
         await txn.insert(_tableTrxItem, item.toMap(transactionId: trxId));
         await txn.rawUpdate(
-          'UPDATE $_tableMenu SET stock = stock - ? WHERE id = ?',
+          'UPDATE $_tableMenu SET stock = stock - ? WHERE id = ? AND trackStock = 1',
           [item.qty, item.menuId],
         );
       }
@@ -328,7 +433,7 @@ class DatabaseService {
       // Kembalikan stok. Menu yang sudah dihapus dilewati begitu saja.
       for (final item in items) {
         await txn.rawUpdate(
-          'UPDATE $_tableMenu SET stock = stock + ? WHERE id = ?',
+          'UPDATE $_tableMenu SET stock = stock + ? WHERE id = ? AND trackStock = 1',
           [item['qty'], item['menuId']],
         );
       }
@@ -487,53 +592,4 @@ class DatabaseService {
     return rows.isEmpty ? null : rows.first;
   }
 
-  /// Mengambil semua akun dengan peran tertentu ('owner' atau 'staff').
-  Future<List<Map<String, Object?>>> getUsersByRole(String role) async {
-    final db = await database;
-    return db.query(
-      _tableUsers,
-      where: 'role = ?',
-      whereArgs: [role],
-      orderBy: 'name COLLATE NOCASE ASC',
-    );
-  }
-
-  Future<int> insertUser(Map<String, Object?> values) async {
-    final db = await database;
-    return db.insert(_tableUsers, values);
-  }
-
-  Future<int> updateUser(int id, Map<String, Object?> values) async {
-    final db = await database;
-    return db.update(_tableUsers, values, where: 'id = ?', whereArgs: [id]);
-  }
-
-  /// Menghapus akun kasir. Akun owner tidak bisa dihapus lewat fungsi ini.
-  /// Riwayat transaksi tetap utuh karena nama kasir tersimpan di setiap transaksi.
-  Future<int> deleteStaff(int id) async {
-    final db = await database;
-    return db.delete(
-      _tableUsers,
-      where: 'id = ? AND role = ?',
-      whereArgs: [id, 'staff'],
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // BACKUP & PULIHKAN (dipakai oleh BackupService)
-  // ---------------------------------------------------------------------------
-
-  /// Lokasi file database di HP.
-  Future<String> databaseFilePath() async {
-    return join(await getDatabasesPath(), _dbName);
-  }
-
-  /// Menutup koneksi database. Koneksi dibuka lagi otomatis saat dibutuhkan.
-  Future<void> close() async {
-    final db = _db;
-    _db = null;
-    if (db != null && db.isOpen) {
-      await db.close();
-    }
-  }
-}
+  /// Mengambil semua akun dengan peran t
