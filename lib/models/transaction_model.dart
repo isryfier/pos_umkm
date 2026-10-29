@@ -1,4 +1,5 @@
 import 'menu_model.dart';
+import 'payment.dart';
 
 /// Satu baris di keranjang belanja (hanya di memori, belum disimpan ke database).
 class CartItem {
@@ -100,10 +101,27 @@ class TransactionModel {
   /// Status transaksi: 'SUCCESS' (berhasil) atau 'VOID' (dibatalkan).
   final String status;
 
+  /// Metode bayar: lihat [PaymentMethod] (TUNAI / QRIS / TRANSFER).
+  final String paymentMethod;
+
+  /// Pilihan di bawah QRIS (mis. GoPay). Null untuk metode lain.
+  final String? paymentChannel;
+
+  /// Nomor antrian, mulai dari 1 lagi tiap hari. 0 = transaksi lama (belum ada nomor).
+  final int queueNo;
+
   final List<TransactionItemModel> items;
 
   /// True jika transaksi sudah dibatalkan.
   bool get isVoid => status == 'VOID';
+
+  bool get isCash => paymentMethod == PaymentMethod.cash;
+
+  /// Label metode bayar, contoh: "QRIS - GoPay".
+  String get paymentText => paymentLabel(paymentMethod, paymentChannel);
+
+  /// Nomor antrian berformat 3 digit, contoh: "007". Kosong untuk transaksi lama.
+  String get queueText => queueNo <= 0 ? '' : queueNo.toString().padLeft(3, '0');
 
   const TransactionModel({
     this.id,
@@ -114,6 +132,9 @@ class TransactionModel {
     required this.paidAmount,
     required this.changeAmount,
     this.status = 'SUCCESS',
+    this.paymentMethod = PaymentMethod.cash,
+    this.paymentChannel,
+    this.queueNo = 0,
     this.items = const [],
   });
 
@@ -130,6 +151,9 @@ class TransactionModel {
       paidAmount: map['paidAmount'] as int,
       changeAmount: map['changeAmount'] as int,
       status: (map['status'] as String?) ?? 'SUCCESS',
+      paymentMethod: (map['paymentMethod'] as String?) ?? PaymentMethod.cash,
+      paymentChannel: map['paymentChannel'] as String?,
+      queueNo: (map['queueNo'] as int?) ?? 0,
       items: items,
     );
   }
@@ -145,6 +169,9 @@ class TransactionModel {
       'paidAmount': paidAmount,
       'changeAmount': changeAmount,
       'status': status,
+      'paymentMethod': paymentMethod,
+      'paymentChannel': paymentChannel,
+      'queueNo': queueNo,
     };
   }
 }
