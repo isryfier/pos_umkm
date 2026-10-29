@@ -25,8 +25,14 @@ class _PosScreenState extends State<PosScreen> {
   MenuCategory? _filter; // null = tampilkan semua
   bool _loading = true;
 
-  /// Keranjang: kunci = ID menu.
-  final Map<int, CartItem> _cart = {};
+  /// Keranjang: kunci = "idMenu|catatan" (lihat CartItem.key).
+  /// Menu sama dengan catatan berbeda menjadi baris terpisah.
+  final Map<String, CartItem> _cart = {};
+
+  /// Total porsi satu menu di semua baris keranjang (untuk batas stok).
+  int _menuQty(int menuId) => _cart.values
+      .where((c) => c.menu.id == menuId)
+      .fold(0, (sum, c) => sum + c.qty);
 
   int get _itemCount => _cart.values.fold(0, (sum, c) => sum + c.qty);
   int get _total => _cart.values.fold(0, (sum, c) => sum + c.subtotal);
@@ -45,10 +51,16 @@ class _PosScreenState extends State<PosScreen> {
     setState(() {
       _allMenus = data;
       final byId = {for (final m in data) m.id!: m};
-      _cart.removeWhere((id, _) => !byId.containsKey(id));
+      _cart.removeWhere((_, c) => !byId.containsKey(c.menu.id));
       for (final c in _cart.values) {
         c.menu = byId[c.menu.id!]!;
-        if (c.qty > c.menu.stock) c.qty = c.menu.stock;
+      }
+      // Batasi total porsi per menu sesuai stok (semua baris catatan dihitung).
+      final used = <int, int>{};
+      for (final c in _cart.values) {
+        final left = c.menu.stock - (used[c.menu.id!] ?? 0);
+        if (c.qty > left) c.qty = left < 0 ? 0 : left;
+        used[c.menu.id!] = (used[c.menu.id!] ?? 0) + c.qty;
       }
       _cart.removeWhere((_, c) => c.qty <= 0);
       _loading = false;
@@ -57,9 +69,9 @@ class _PosScreenState extends State<PosScreen> {
 
   /// Menambah satu porsi ke keranjang (dibatasi oleh stok).
   void _addToCart(MenuModel menu) {
-    final existing = _cart[menu.id!];
-    final qty = existing?.qty ?? 0;
-    if (!menu.isAvailable || qty >= menu.stock) {
+    // Ketuk di grid menambah ke baris tanpa catatan.
+    final existing = _cart['${menu.id}|'];
+    if (!menu.isAvailable || _menuQty(menu.id!) >= menu.stock) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Stok ${menu.name} tidak cukup'),
@@ -71,7 +83,8 @@ class _PosScreenState extends State<PosScreen> {
     }
     setState(() {
       if (existing == null) {
-        _cart[menu.id!] = CartItem(menu: menu);
+        final c = CartItem(menu: menu);
+        _cart[c.key] = c;
       } else {
         existing.qty++;
       }
@@ -83,11 +96,76 @@ class _PosScreenState extends State<PosScreen> {
     setState(() {
       final n = item.qty + delta;
       if (n <= 0) {
-        _cart.remove(item.menu.id);
-      } else if (n <= item.menu.stock) {
+        _cart.remove(item.key);
+      } else if (delta < 0 ||
+          _menuQty(item.menu.id!) + delta <= item.menu.stock) {
         item.qty = n;
       }
     });
+  }
+
+  /// Mengubah catatan satu baris. Karena kunci baris memuat catatan,
+  /// baris dipindah ke kunci baru dan digabung jika sudah ada yang sama.
+  void _setNote(CartItem item, String note) {
+    final clean = note.trim();
+    if (clean == item.note) return;
+    setState(() {
+      _cart.remove(item.key);
+      item.note = clean;
+      final other = _cart[item.key];
+      if (other == null) {
+        _cart[item.key] = item;
+      } else {
+        other.qty += item.qty;
+      }
+    });
+  }
+
+  /// Dialog isi catatan. Mengembalikan teks (boleh kosong) atau null jika batal.
+  Future<String?> _askNote(CartItem item) {
+    final controller = TextEditingController(text: item.note);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Catatan: ${item.menu.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLength: 80,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                hintText: 'mis. tanpa gula, pedas, diskon 5rb',
+              ),
+              onSubmitted: (v) => Navigator.pop(ctx, v),
+            ),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final t in ['Tanpa gula', 'Less ice', 'Pedas', 'Tidak pedas'])
+                  ActionChip(
+                    label: Text(t),
+                    onPressed: () => controller.text = t,
+                  ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Menampilkan isi keranjang dalam bottom sheet.
@@ -134,8 +212,34 @@ class _PosScreenState extends State<PosScreen> {
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(c.menu.name),
-                        subtitle: Text(
-                            '${formatRupiah(c.menu.price)} x ${c.qty} = ${formatRupiah(c.subtotal)}'),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                                '${formatRupiah(c.menu.price)} x ${c.qty} = ${formatRupiah(c.subtotal)}'),
+                            InkWell(
+                              onTap: () async {
+                                final n = await _askNote(c);
+                                if (n == null) return;
+                                _setNote(c, n);
+                                setSheet(() {});
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Text(
+                                  c.note.isEmpty
+                                      ? '+ Tambah catatan'
+                                      : 'Catatan: ${c.note}',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(ctx).colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -222,6 +326,7 @@ class _PosScreenState extends State<PosScreen> {
                   menuName: c.menu.name,
                   price: c.menu.price,
                   qty: c.qty,
+                  note: c.note.trim().isEmpty ? null : c.note.trim(),
                 ))
             .toList(),
       );
@@ -343,7 +448,7 @@ class _PosScreenState extends State<PosScreen> {
 
   /// Kartu satu menu di grid. Ketuk untuk menambah ke keranjang.
   Widget _menuCard(MenuModel menu) {
-    final inCart = _cart[menu.id!]?.qty ?? 0;
+    final inCart = _menuQty(menu.id!);
     final soldOut = !menu.isAvailable || menu.stock <= 0;
     final colors = Theme.of(context).colorScheme;
 
@@ -485,55 +590,4 @@ class _PaymentDialogState extends State<_PaymentDialog> {
               controller: _controller,
               autofocus: true,
               keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: 'Uang diterima',
-                prefixText: 'Rp ',
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                ActionChip(
-                  label: const Text('Uang pas'),
-                  onPressed: () => _setPaid(widget.total),
-                ),
-                for (final v in [10000, 20000, 50000, 100000])
-                  ActionChip(
-                    label: Text(formatRupiah(v)),
-                    onPressed: () => _setPaid(v),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _paid == 0
-                  ? 'Masukkan uang diterima'
-                  : enough
-                      ? 'Kembalian: ${formatRupiah(_paid - widget.total)}'
-                      : 'Kurang: ${formatRupiah(widget.total - _paid)}',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: _paid == 0
-                    ? null
-                    : (enough ? Colors.green.shade700 : Colors.red),
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Batal'),
-        ),
-        FilledButton(
-          onPressed: enough ? () => Navigator.pop(context, _paid) : null,
-          child: const Text('Proses'),
-        ),
-      ],
-    );
-  }
-}
+              inputFormatters: [FilteringTextI
