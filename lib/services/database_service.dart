@@ -25,6 +25,13 @@ class VoidException implements Exception {
   String toString() => message;
 }
 
+/// Hasil penyimpanan transaksi: ID dan nomor antrian yang diberikan.
+class SavedTransaction {
+  final int id;
+  final int queueNo;
+  const SavedTransaction(this.id, this.queueNo);
+}
+
 /// Dilempar saat operasi kategori tidak bisa dilakukan
 /// (nama kembar, atau kategori masih dipakai menu).
 class CategoryException implements Exception {
@@ -58,8 +65,9 @@ class DatabaseService {
   /// Versi 3 = tambah kolom `status` di transaksi untuk void (Sesi 3A).
   /// Versi 4 = tambah tabel `users` untuk akun owner/kasir (Sesi 5).
   /// Versi 5 = tambah kolom `note` di item transaksi untuk catatan pesanan (Sesi 7).
+  /// Versi 7 = metode bayar (`paymentMethod`, `paymentChannel`) dan nomor antrian harian (`queueNo`).
   /// Versi 6 = kategori menu bebas (tabel `categories`) + kolom `trackStock` (stok tak terbatas).
-  static const int _dbVersion = 6;
+  static const int _dbVersion = 7;
 
   /// Versi struktur database saat ini (dipakai untuk memeriksa file backup).
   static const int schemaVersion = _dbVersion;
@@ -95,6 +103,18 @@ class DatabaseService {
             // Dari versi 2: tabel ada, tapi belum punya kolom status.
             await db.execute(
               "ALTER TABLE $_tableTrx ADD COLUMN status TEXT NOT NULL DEFAULT 'SUCCESS'",
+            );
+          }
+          if (oldVersion < 7) {
+            // Metode bayar + nomor antrian. Transaksi lama dianggap tunai, tanpa nomor.
+            await db.execute(
+              "ALTER TABLE $_tableTrx ADD COLUMN paymentMethod TEXT NOT NULL DEFAULT 'TUNAI'",
+            );
+            await db.execute(
+              'ALTER TABLE $_tableTrx ADD COLUMN paymentChannel TEXT',
+            );
+            await db.execute(
+              'ALTER TABLE $_tableTrx ADD COLUMN queueNo INTEGER NOT NULL DEFAULT 0',
             );
           }
           if (oldVersion < 5) {
@@ -167,7 +187,10 @@ class DatabaseService {
         total INTEGER NOT NULL,
         paidAmount INTEGER NOT NULL,
         changeAmount INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'SUCCESS'
+        status TEXT NOT NULL DEFAULT 'SUCCESS',
+        paymentMethod TEXT NOT NULL DEFAULT 'TUNAI',
+        paymentChannel TEXT,
+        queueNo INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.execute('''
@@ -320,8 +343,8 @@ class DatabaseService {
   ///
   /// Semuanya dalam satu transaksi database: kalau ada yang gagal (misalnya
   /// stok tidak cukup), seluruh perubahan dibatalkan dan [StockException] dilempar.
-  /// Mengembalikan ID transaksi yang dibuat.
-  Future<int> insertTransaction(TransactionModel trx) async {
+  /// Mengembalikan ID transaksi dan nomor antrian hari itu.
+  Future<SavedTransaction> insertTransaction(TransactionModel trx) async {
     final db = await database;
     return db.transaction((txn) async {
       // 1) Cek stok. Item dengan menu yang sama (tapi catatan berbeda)
@@ -351,7 +374,17 @@ class DatabaseService {
       }
 
       // 2) Simpan transaksi.
-      final trxId = await txn.insert(_tableTrx, trx.toMap());
+      // Nomor antrian = nomor terbesar hari ini + 1 (mulai 1 lagi tiap hari).
+      final dayStart =
+          DateTime(trx.createdAt.year, trx.createdAt.month, trx.createdAt.day);
+      final dayEnd = DateTime(dayStart.year, dayStart.month, dayStart.day + 1);
+      final maxQ = Sqflite.firstIntValue(await txn.rawQuery(
+              'SELECT MAX(queueNo) FROM $_tableTrx WHERE createdAt >= ? AND createdAt < ?',
+              [dayStart.millisecondsSinceEpoch, dayEnd.millisecondsSinceEpoch])) ??
+          0;
+      final queueNo = maxQ + 1;
+      final trxId = await txn.insert(
+          _tableTrx, {...trx.toMap(), 'queueNo': queueNo});
 
       // 3) Simpan tiap item dan kurangi stoknya.
       for (final item in trx.items) {
@@ -361,7 +394,7 @@ class DatabaseService {
           [item.qty, item.menuId],
         );
       }
-      return trxId;
+      return SavedTransaction(trxId, queueNo);
     });
   }
 
@@ -465,7 +498,7 @@ class DatabaseService {
 
     final trxRows = await db.query(
       _tableTrx,
-      columns: ['createdAt', 'total', 'status'],
+      columns: ['createdAt', 'total', 'status', 'paymentMethod', 'paymentChannel'],
       where: 'createdAt >= ? AND createdAt < ?',
       whereArgs: args,
     );
@@ -479,6 +512,7 @@ class DatabaseService {
     int totalSales = 0;
     int trxCount = 0;
     int voidCount = 0;
+    final methodMap = <String, List<int>>{}; // "METODE|channel" -> [total, jumlah]
     for (final row in trxRows) {
       if (row['status'] == 'VOID') {
         voidCount++;
@@ -493,6 +527,12 @@ class DatabaseService {
       }
       totalSales += total;
       trxCount++;
+
+      final m = (row['paymentMethod'] as String?) ?? 'TUNAI';
+      final ch = (row['paymentChannel'] as String?) ?? '';
+      final slotM = methodMap.putIfAbsent('$m|$ch', () => [0, 0]);
+      slotM[0] += total;
+      slotM[1] += 1;
     }
 
     // Menu terlaris: dijumlahkan dari item transaksi yang tidak di-void.
@@ -532,7 +572,40 @@ class DatabaseService {
               ))
           .toList(),
       topMenus: topMenus,
+      byMethod: methodMap.entries.map((e) {
+        final parts = e.key.split('|');
+        return MethodSales(
+          method: parts[0],
+          channel: parts[1].isEmpty ? null : parts[1],
+          total: e.value[0],
+          count: e.value[1],
+        );
+      }).toList(),
     );
+  }
+
+  /// Satu baris per item terjual untuk ekspor (CSV). Termasuk transaksi VOID
+  /// (ditandai di kolom status) supaya jejaknya tetap terlihat.
+  Future<List<Map<String, Object?>>> getSalesLines({
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final db = await database;
+    final start = DateTime(from.year, from.month, from.day);
+    final end = DateTime(to.year, to.month, to.day + 1);
+    return db.rawQuery('''
+      SELECT t.createdAt AS createdAt, t.queueNo AS queueNo,
+             t.invoiceNo AS invoiceNo, t.cashierName AS cashier,
+             t.paymentMethod AS paymentMethod, t.paymentChannel AS paymentChannel,
+             t.status AS status,
+             i.menuName AS menuName, m.category AS category,
+             i.qty AS qty, i.price AS price, i.note AS note
+      FROM $_tableTrxItem i
+      JOIN $_tableTrx t ON t.id = i.transactionId
+      LEFT JOIN $_tableMenu m ON m.id = i.menuId
+      WHERE t.createdAt >= ? AND t.createdAt < ?
+      ORDER BY t.createdAt ASC, i.id ASC
+    ''', [start.millisecondsSinceEpoch, end.millisecondsSinceEpoch]);
   }
 
   // ---------------------------------------------------------------------------
