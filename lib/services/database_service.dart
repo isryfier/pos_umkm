@@ -46,7 +46,8 @@ class DatabaseService {
   /// Versi 2 = tambah tabel transaksi (Sesi 2B).
   /// Versi 3 = tambah kolom `status` di transaksi untuk void (Sesi 3A).
   /// Versi 4 = tambah tabel `users` untuk akun owner/kasir (Sesi 5).
-  static const int _dbVersion = 4;
+  /// Versi 5 = tambah kolom `note` di item transaksi untuk catatan pesanan (Sesi 7).
+  static const int _dbVersion = 5;
 
   /// Versi struktur database saat ini (dipakai untuk memeriksa file backup).
   static const int schemaVersion = _dbVersion;
@@ -74,13 +75,21 @@ class DatabaseService {
       // Pengguna lama: naikkan versi tanpa menghapus data.
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
-          // Dari versi 1: tabel transaksi belum ada (sudah termasuk kolom status).
+          // Dari versi 1: tabel transaksi belum ada (sudah lengkap: status & note).
           await _createTransactionTables(db);
-        } else if (oldVersion < 3) {
-          // Dari versi 2: tabel ada, tapi belum punya kolom status.
-          await db.execute(
-            "ALTER TABLE $_tableTrx ADD COLUMN status TEXT NOT NULL DEFAULT 'SUCCESS'",
-          );
+        } else {
+          if (oldVersion < 3) {
+            // Dari versi 2: tabel ada, tapi belum punya kolom status.
+            await db.execute(
+              "ALTER TABLE $_tableTrx ADD COLUMN status TEXT NOT NULL DEFAULT 'SUCCESS'",
+            );
+          }
+          if (oldVersion < 5) {
+            // Dari versi 2-4: tambah kolom catatan pesanan di item transaksi.
+            await db.execute(
+              'ALTER TABLE $_tableTrxItem ADD COLUMN note TEXT',
+            );
+          }
         }
         if (oldVersion < 4) {
           // Tabel akun baru + satu akun owner awal. Data lain tidak disentuh.
@@ -124,7 +133,8 @@ class DatabaseService {
         menuId INTEGER NOT NULL,
         menuName TEXT NOT NULL,
         price INTEGER NOT NULL,
-        qty INTEGER NOT NULL
+        qty INTEGER NOT NULL,
+        note TEXT
       )
     ''');
   }
@@ -210,21 +220,28 @@ class DatabaseService {
   Future<int> insertTransaction(TransactionModel trx) async {
     final db = await database;
     return db.transaction((txn) async {
-      // 1) Cek stok semua item lebih dulu.
+      // 1) Cek stok. Item dengan menu yang sama (tapi catatan berbeda)
+      //    dijumlahkan dulu, supaya total pesanan tidak melebihi stok.
+      final needed = <int, int>{};
+      final names = <int, String>{};
       for (final item in trx.items) {
+        needed[item.menuId] = (needed[item.menuId] ?? 0) + item.qty;
+        names[item.menuId] = item.menuName;
+      }
+      for (final entry in needed.entries) {
         final rows = await txn.query(
           _tableMenu,
           columns: ['stock'],
           where: 'id = ?',
-          whereArgs: [item.menuId],
+          whereArgs: [entry.key],
         );
         if (rows.isEmpty) {
-          throw StockException('Menu "${item.menuName}" sudah dihapus');
+          throw StockException('Menu "${names[entry.key]}" sudah dihapus');
         }
         final stock = rows.first['stock'] as int;
-        if (stock < item.qty) {
+        if (stock < entry.value) {
           throw StockException(
-              'Stok "${item.menuName}" tinggal $stock, tidak cukup');
+              'Stok "${names[entry.key]}" tinggal $stock, tidak cukup');
         }
       }
 
