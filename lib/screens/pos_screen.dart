@@ -22,7 +22,9 @@ class _PosScreenState extends State<PosScreen> {
   final _db = DatabaseService.instance;
 
   List<MenuModel> _allMenus = [];
-  MenuCategory? _filter; // null = tampilkan semua
+  List<String> _categories = [];
+  String? _filter; // null = tampilkan semua
+  String _query = '';
   bool _loading = true;
 
   /// Keranjang: kunci = "idMenu|catatan" (lihat CartItem.key).
@@ -47,9 +49,12 @@ class _PosScreenState extends State<PosScreen> {
   /// (menu yang sudah dihapus dibuang, jumlah dibatasi sesuai stok).
   Future<void> _loadMenus() async {
     final data = await _db.getAllMenu();
+    final cats = await _db.getCategories();
     if (!mounted) return;
     setState(() {
       _allMenus = data;
+      _categories = cats;
+      if (_filter != null && !cats.contains(_filter)) _filter = null;
       final byId = {for (final m in data) m.id!: m};
       _cart.removeWhere((_, c) => !byId.containsKey(c.menu.id));
       for (final c in _cart.values) {
@@ -58,8 +63,11 @@ class _PosScreenState extends State<PosScreen> {
       // Batasi total porsi per menu sesuai stok (semua baris catatan dihitung).
       final used = <int, int>{};
       for (final c in _cart.values) {
-        final left = c.menu.stock - (used[c.menu.id!] ?? 0);
-        if (c.qty > left) c.qty = left < 0 ? 0 : left;
+        if (!c.menu.isAvailable) c.qty = 0;
+        if (c.menu.trackStock) {
+          final left = c.menu.stock - (used[c.menu.id!] ?? 0);
+          if (c.qty > left) c.qty = left < 0 ? 0 : left;
+        }
         used[c.menu.id!] = (used[c.menu.id!] ?? 0) + c.qty;
       }
       _cart.removeWhere((_, c) => c.qty <= 0);
@@ -71,7 +79,7 @@ class _PosScreenState extends State<PosScreen> {
   void _addToCart(MenuModel menu) {
     // Ketuk di grid menambah ke baris tanpa catatan.
     final existing = _cart['${menu.id}|'];
-    if (!menu.isAvailable || _menuQty(menu.id!) >= menu.stock) {
+    if (!menu.hasStockFor(_menuQty(menu.id!) + 1)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Stok ${menu.name} tidak cukup'),
@@ -98,7 +106,7 @@ class _PosScreenState extends State<PosScreen> {
       if (n <= 0) {
         _cart.remove(item.key);
       } else if (delta < 0 ||
-          _menuQty(item.menu.id!) + delta <= item.menu.stock) {
+          item.menu.hasStockFor(_menuQty(item.menu.id!) + delta)) {
         item.qty = n;
       }
     });
@@ -387,22 +395,35 @@ class _PosScreenState extends State<PosScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final menus = _filter == null
-        ? _allMenus
-        : _allMenus.where((m) => m.category == _filter).toList();
+    final q = _query.trim().toLowerCase();
+    final menus = _allMenus
+        .where((m) => _filter == null || m.category == _filter)
+        .where((m) => q.isEmpty || m.name.toLowerCase().contains(q))
+        .toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Kasir')),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Wrap(
-              spacing: 8,
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: TextField(
+              decoration: const InputDecoration(
+                hintText: 'Cari menu...',
+                prefixIcon: Icon(Icons.search),
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Row(
               children: [
                 _filterChip('Semua', null),
-                _filterChip('Makanan', MenuCategory.makanan),
-                _filterChip('Minuman', MenuCategory.minuman),
+                for (final c in _categories) _filterChip(c, c),
               ],
             ),
           ),
@@ -438,18 +459,21 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
-  Widget _filterChip(String label, MenuCategory? value) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: _filter == value,
-      onSelected: (_) => setState(() => _filter = value),
+  Widget _filterChip(String label, String? value) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: _filter == value,
+        onSelected: (_) => setState(() => _filter = value),
+      ),
     );
   }
 
   /// Kartu satu menu di grid. Ketuk untuk menambah ke keranjang.
   Widget _menuCard(MenuModel menu) {
     final inCart = _menuQty(menu.id!);
-    final soldOut = !menu.isAvailable || menu.stock <= 0;
+    final soldOut = menu.isSoldOut;
     final colors = Theme.of(context).colorScheme;
 
     return Opacity(
@@ -482,7 +506,9 @@ class _PosScreenState extends State<PosScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      soldOut ? 'Habis' : 'Stok ${menu.stock}',
+                      soldOut
+                          ? 'Habis'
+                          : (menu.trackStock ? 'Stok ${menu.stock}' : 'Tersedia'),
                       style: const TextStyle(fontSize: 12),
                     ),
                   ],
