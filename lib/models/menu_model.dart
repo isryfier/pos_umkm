@@ -1,24 +1,25 @@
-/// Kategori menu: makanan atau minuman.
-enum MenuCategory { makanan, minuman }
-
 /// Model data menu (produk) yang dijual.
 class MenuModel {
   /// ID dibuat otomatis oleh SQLite. Bernilai null untuk menu yang belum disimpan.
   final int? id;
 
-  /// Nama menu, misalnya "Nasi Goreng".
+  /// Nama menu, misalnya "Thai Tea".
   final String name;
 
   /// Harga dalam rupiah (bilangan bulat, tanpa desimal).
   final int price;
 
-  /// Kategori: makanan atau minuman.
-  final MenuCategory category;
+  /// Nama kategori, misalnya "Tea Series". Kategori dikelola Owner.
+  final String category;
 
-  /// Jumlah stok yang tersedia.
+  /// Jumlah stok yang tersedia (hanya dipakai jika [trackStock] = true).
   final int stock;
 
-  /// Penanda menu bisa dijual atau tidak (misalnya sedang kosong/ditutup).
+  /// true = stok dihitung dan berkurang tiap terjual.
+  /// false = stok tak terbatas (selalu bisa dijual).
+  final bool trackStock;
+
+  /// Penanda menu bisa dijual atau tidak (misalnya sedang ditutup).
   final bool isAvailable;
 
   const MenuModel({
@@ -26,22 +27,25 @@ class MenuModel {
     required this.name,
     required this.price,
     required this.category,
-    required this.stock,
+    this.stock = 0,
+    this.trackStock = true,
     this.isAvailable = true,
   });
 
-  /// Label kategori dalam Bahasa Indonesia untuk ditampilkan di layar.
-  String get categoryLabel =>
-      category == MenuCategory.makanan ? 'Makanan' : 'Minuman';
+  /// True jika menu tidak bisa dijual sama sekali saat ini.
+  bool get isSoldOut => !isAvailable || (trackStock && stock <= 0);
+
+  /// True jika menu masih cukup untuk dijual sebanyak [qty] porsi.
+  bool hasStockFor(int qty) => isAvailable && (!trackStock || qty <= stock);
 
   /// Membuat salinan menu dengan sebagian data diubah.
-  /// Berguna saat edit harga/stok tanpa mengubah field lainnya.
   MenuModel copyWith({
     int? id,
     String? name,
     int? price,
-    MenuCategory? category,
+    String? category,
     int? stock,
+    bool? trackStock,
     bool? isAvailable,
   }) {
     return MenuModel(
@@ -50,34 +54,33 @@ class MenuModel {
       price: price ?? this.price,
       category: category ?? this.category,
       stock: stock ?? this.stock,
+      trackStock: trackStock ?? this.trackStock,
       isAvailable: isAvailable ?? this.isAvailable,
     );
   }
 
   /// Membaca satu baris dari database SQLite menjadi MenuModel.
-  /// SQLite tidak punya tipe boolean, jadi isAvailable disimpan sebagai 0/1.
   factory MenuModel.fromMap(Map<String, dynamic> map) {
     return MenuModel(
       id: map['id'] as int?,
       name: map['name'] as String,
       price: map['price'] as int,
-      category: map['category'] == 'minuman'
-          ? MenuCategory.minuman
-          : MenuCategory.makanan,
+      category: map['category'] as String,
       stock: map['stock'] as int,
+      trackStock: ((map['trackStock'] as int?) ?? 1) == 1,
       isAvailable: (map['isAvailable'] as int) == 1,
     );
   }
 
   /// Mengubah MenuModel menjadi Map untuk disimpan ke database.
-  /// ID tidak dimasukkan kalau masih null supaya SQLite membuatnya sendiri.
   Map<String, dynamic> toMap() {
     return {
       if (id != null) 'id': id,
       'name': name,
       'price': price,
-      'category': category.name, // 'makanan' atau 'minuman'
+      'category': category,
       'stock': stock,
+      'trackStock': trackStock ? 1 : 0,
       'isAvailable': isAvailable ? 1 : 0,
     };
   }
