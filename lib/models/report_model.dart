@@ -32,6 +32,21 @@ class DailySales {
   });
 }
 
+/// Penjualan per metode bayar (dan per pilihan QRIS, mis. GoPay).
+class MethodSales {
+  final String method;
+  final String? channel;
+  final int total;
+  final int count;
+
+  const MethodSales({
+    required this.method,
+    required this.channel,
+    required this.total,
+    required this.count,
+  });
+}
+
 /// Ringkasan laporan penjualan untuk satu rentang tanggal.
 /// Transaksi VOID tidak dihitung sebagai penjualan.
 class SalesReport {
@@ -53,6 +68,9 @@ class SalesReport {
   /// Menu terlaris, urut dari yang paling banyak terjual.
   final List<TopMenu> topMenus;
 
+  /// Penjualan per metode bayar + pilihan QRIS (tidak termasuk VOID).
+  final List<MethodSales> byMethod;
+
   const SalesReport({
     required this.totalSales,
     required this.trxCount,
@@ -60,6 +78,7 @@ class SalesReport {
     required this.itemsSold,
     required this.daily,
     required this.topMenus,
+    this.byMethod = const [],
   });
 
   /// Rata-rata nilai per transaksi.
