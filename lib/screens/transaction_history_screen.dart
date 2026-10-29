@@ -121,9 +121,11 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      trx.invoiceNo,
+                      trx.queueText.isEmpty
+                          ? trx.invoiceNo
+                          : 'Antrian ${trx.queueText}  •  ${trx.invoiceNo}',
                       style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold),
+                          fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ),
                   if (trx.isVoid) _voidBadge(),
@@ -150,8 +152,11 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                 ),
               const Divider(height: 24),
               _row('Total', formatRupiah(trx.total), bold: true),
-              _row('Dibayar', formatRupiah(trx.paidAmount)),
-              _row('Kembalian', formatRupiah(trx.changeAmount)),
+              _row('Metode', trx.paymentText),
+              if (trx.isCash) ...[
+                _row('Dibayar', formatRupiah(trx.paidAmount)),
+                _row('Kembalian', formatRupiah(trx.changeAmount)),
+              ],
               const SizedBox(height: 16),
               if (!trx.isVoid)
                 OutlinedButton.icon(
@@ -277,7 +282,9 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
           children: [
             Flexible(
               child: Text(
-                trx.invoiceNo,
+                trx.queueText.isEmpty
+                    ? trx.invoiceNo
+                    : '#${trx.queueText}  ${trx.invoiceNo}',
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
@@ -292,7 +299,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
           ],
         ),
         subtitle: Text(
-            '${_timeLabel(trx.createdAt)}  •  ${trx.cashierName}  •  ${trx.items.length} item'),
+            '${_timeLabel(trx.createdAt)}  •  ${trx.cashierName}  •  ${trx.paymentText}'),
         trailing: Text(
           formatRupiah(trx.total),
           style: TextStyle(
