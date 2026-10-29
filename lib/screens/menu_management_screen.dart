@@ -3,9 +3,10 @@ import 'package:flutter/services.dart';
 
 import '../models/menu_model.dart';
 import '../services/database_service.dart';
+import 'category_management_screen.dart';
 
 /// Halaman Kelola Menu & Stok (khusus Owner).
-/// Fitur: lihat daftar menu (filter Makanan/Minuman), tambah, edit, ubah stok, hapus.
+/// Fitur: lihat daftar menu (filter per kategori), tambah, edit, ubah stok, hapus.
 class MenuManagementScreen extends StatefulWidget {
   const MenuManagementScreen({super.key});
 
@@ -17,7 +18,8 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
   final _db = DatabaseService.instance;
 
   List<MenuModel> _menus = [];
-  MenuCategory? _filter; // null = tampilkan semua
+  List<String> _categories = [];
+  String? _filter; // null = tampilkan semua
   bool _loading = true;
 
   @override
@@ -29,9 +31,12 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
   /// Mengambil daftar menu dari database sesuai filter yang dipilih.
   Future<void> _loadMenus() async {
     setState(() => _loading = true);
+    final cats = await _db.getCategories();
+    if (_filter != null && !cats.contains(_filter)) _filter = null;
     final data = await _db.getAllMenu(category: _filter);
     if (!mounted) return;
     setState(() {
+      _categories = cats;
       _menus = data;
       _loading = false;
     });
@@ -43,7 +48,11 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _MenuFormSheet(existing: existing),
+      builder: (_) => _MenuFormSheet(
+        existing: existing,
+        categories: _categories,
+        defaultCategory: _filter,
+      ),
     );
     if (result == null) return; // pengguna menutup form tanpa menyimpan
 
@@ -109,7 +118,23 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Kelola Menu & Stok')),
+      appBar: AppBar(
+        title: const Text('Kelola Menu & Stok'),
+        actions: [
+          IconButton(
+            tooltip: 'Kelola kategori',
+            icon: const Icon(Icons.category_outlined),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const CategoryManagementScreen()),
+              );
+              _loadMenus();
+            },
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openForm(),
         icon: const Icon(Icons.add),
@@ -120,13 +145,14 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
           // Filter kategori
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                _filterChip('Semua', null),
-                _filterChip('Makanan', MenuCategory.makanan),
-                _filterChip('Minuman', MenuCategory.minuman),
-              ],
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _filterChip('Semua', null),
+                  for (final c in _categories) _filterChip(c, c),
+                ],
+              ),
             ),
           ),
           Expanded(
@@ -154,20 +180,23 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
   }
 
   /// Satu chip filter kategori.
-  Widget _filterChip(String label, MenuCategory? value) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: _filter == value,
-      onSelected: (_) {
-        setState(() => _filter = value);
-        _loadMenus();
-      },
+  Widget _filterChip(String label, String? value) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: _filter == value,
+        onSelected: (_) {
+          setState(() => _filter = value);
+          _loadMenus();
+        },
+      ),
     );
   }
 
   /// Kartu untuk satu menu.
   Widget _menuCard(MenuModel menu) {
-    final habis = menu.stock == 0 || !menu.isAvailable;
+    final habis = menu.isSoldOut;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -187,7 +216,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                             fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 4),
-                      Text('${_rupiah(menu.price)}  •  ${menu.categoryLabel}'),
+                      Text('${_rupiah(menu.price)}  •  ${menu.category}'),
                       if (habis)
                         const Padding(
                           padding: EdgeInsets.only(top: 4),
@@ -211,25 +240,39 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                 ),
               ],
             ),
-            Row(
-              children: [
-                const Text('Stok'),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.remove_circle_outline),
-                  onPressed: () => _changeStock(menu, -1),
+            if (menu.trackStock)
+              Row(
+                children: [
+                  const Text('Stok'),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.remove_circle_outline),
+                    onPressed: () => _changeStock(menu, -1),
+                  ),
+                  Text(
+                    '${menu.stock}',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline),
+                    onPressed: () => _changeStock(menu, 1),
+                  ),
+                ],
+              )
+            else
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Text('Stok'),
+                    Spacer(),
+                    Text('Tak terbatas ∞',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    SizedBox(width: 8),
+                  ],
                 ),
-                Text(
-                  '${menu.stock}',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add_circle_outline),
-                  onPressed: () => _changeStock(menu, 1),
-                ),
-              ],
-            ),
+              ),
           ],
         ),
       ),
@@ -241,8 +284,16 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
 /// Mengembalikan [MenuModel] lewat Navigator.pop saat tombol Simpan ditekan.
 class _MenuFormSheet extends StatefulWidget {
   final MenuModel? existing;
+  final List<String> categories;
 
-  const _MenuFormSheet({this.existing});
+  /// Kategori yang sedang difilter, dipakai sebagai pilihan awal menu baru.
+  final String? defaultCategory;
+
+  const _MenuFormSheet({
+    this.existing,
+    required this.categories,
+    this.defaultCategory,
+  });
 
   @override
   State<_MenuFormSheet> createState() => _MenuFormSheetState();
@@ -253,7 +304,8 @@ class _MenuFormSheetState extends State<_MenuFormSheet> {
   late final TextEditingController _nameC;
   late final TextEditingController _priceC;
   late final TextEditingController _stockC;
-  late MenuCategory _category;
+  late String? _category;
+  late bool _trackStock;
   late bool _isAvailable;
 
   @override
@@ -263,7 +315,10 @@ class _MenuFormSheetState extends State<_MenuFormSheet> {
     _nameC = TextEditingController(text: e?.name ?? '');
     _priceC = TextEditingController(text: e?.price.toString() ?? '');
     _stockC = TextEditingController(text: e?.stock.toString() ?? '0');
-    _category = e?.category ?? MenuCategory.makanan;
+    _category = e?.category ??
+        widget.defaultCategory ??
+        (widget.categories.isNotEmpty ? widget.categories.first : null);
+    _trackStock = e?.trackStock ?? true;
     _isAvailable = e?.isAvailable ?? true;
   }
 
@@ -284,8 +339,9 @@ class _MenuFormSheetState extends State<_MenuFormSheet> {
         id: widget.existing?.id,
         name: _nameC.text.trim(),
         price: int.parse(_priceC.text),
-        category: _category,
-        stock: int.parse(_stockC.text),
+        category: _category!,
+        stock: _trackStock ? int.parse(_stockC.text) : (widget.existing?.stock ?? 0),
+        trackStock: _trackStock,
         isAvailable: _isAvailable,
       ),
     );
@@ -334,31 +390,35 @@ class _MenuFormSheetState extends State<_MenuFormSheet> {
                 },
               ),
               const SizedBox(height: 12),
-              TextFormField(
-                controller: _stockC,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(labelText: 'Stok'),
-                validator: (v) =>
-                    int.tryParse(v ?? '') == null ? 'Stok wajib diisi' : null,
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<MenuCategory>(
-                segments: const [
-                  ButtonSegment(
-                    value: MenuCategory.makanan,
-                    label: Text('Makanan'),
-                    icon: Icon(Icons.restaurant),
-                  ),
-                  ButtonSegment(
-                    value: MenuCategory.minuman,
-                    label: Text('Minuman'),
-                    icon: Icon(Icons.local_cafe),
-                  ),
+              DropdownButtonFormField<String>(
+                value: _category,
+                decoration: const InputDecoration(labelText: 'Kategori'),
+                items: [
+                  for (final c in widget.categories)
+                    DropdownMenuItem(value: c, child: Text(c)),
                 ],
-                selected: {_category},
-                onSelectionChanged: (s) => setState(() => _category = s.first),
+                onChanged: (v) => setState(() => _category = v),
+                validator: (v) =>
+                    v == null ? 'Pilih kategori (buat dulu di Kelola Kategori)' : null,
               ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Hitung stok'),
+                subtitle: Text(_trackStock
+                    ? 'Stok berkurang tiap terjual'
+                    : 'Stok tak terbatas, selalu bisa dijual'),
+                value: _trackStock,
+                onChanged: (v) => setState(() => _trackStock = v),
+              ),
+              if (_trackStock)
+                TextFormField(
+                  controller: _stockC,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(labelText: 'Stok'),
+                  validator: (v) =>
+                      int.tryParse(v ?? '') == null ? 'Stok wajib diisi' : null,
+                ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Tersedia untuk dijual'),
